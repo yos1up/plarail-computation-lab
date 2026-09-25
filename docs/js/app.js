@@ -72,14 +72,23 @@ const curStates = () => (simActive ? sim.states : initialStates(layout));
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 // ---------- 座標変換 ----------
-let W = 0, H = 0, DPR = 1;
+let W = 0, H = 0, DPR = 1, ready = false;
 function resize() {
   const r = canvas.getBoundingClientRect();
-  DPR = window.devicePixelRatio || 1;
+  const dpr = window.devicePixelRatio || 1;
+  if (r.width === W && r.height === H && dpr === DPR) return;
+  DPR = dpr;
   W = r.width; H = r.height;
   canvas.width = Math.round(W * DPR);
   canvas.height = Math.round(H * DPR);
   dirty = true;
+  // canvas.width の再設定で内容が消えるため、ちらつかないよう即座に描き直す
+  if (ready) render();
+}
+// ポインタ位置を canvas 基準の CSS px で得る（offsetX はブラウザ差があるため使わない）
+function localXY(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 const toScreen = (p) => ({ x: (p.x - view.cx) * view.scale + W / 2, y: -(p.y - view.cy) * view.scale + H / 2 });
 const toWorld = (x, y) => ({ x: (x - W / 2) / view.scale + view.cx, y: -(y - H / 2) / view.scale + view.cy });
@@ -580,8 +589,9 @@ const pointers = new Map();
 let gesture = null;
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
-  if (pointers.size === 1) gesture = { kind: 'maybe-tap', x0: e.offsetX, y0: e.offsetY, cx: view.cx, cy: view.cy };
+  const pt = localXY(e);
+  pointers.set(e.pointerId, pt);
+  if (pointers.size === 1) gesture = { kind: 'maybe-tap', x0: pt.x, y0: pt.y, cx: view.cx, cy: view.cy };
   else if (pointers.size === 2) {
     const [p, q] = [...pointers.values()];
     gesture = { kind: 'pinch', d0: Math.hypot(p.x - q.x, p.y - q.y), s0: view.scale, m: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, w: toWorld((p.x + q.x) / 2, (p.y + q.y) / 2) };
@@ -589,7 +599,8 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!pointers.has(e.pointerId)) return;
-  pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+  const pt = localXY(e);
+  pointers.set(e.pointerId, pt);
   if (!gesture) return;
   if (gesture.kind === 'pinch' && pointers.size >= 2) {
     const [p, q] = [...pointers.values()];
@@ -601,7 +612,7 @@ canvas.addEventListener('pointermove', (e) => {
     dirty = true;
     return;
   }
-  const dx = e.offsetX - gesture.x0, dy = e.offsetY - gesture.y0;
+  const dx = pt.x - gesture.x0, dy = pt.y - gesture.y0;
   if (gesture.kind === 'maybe-tap' && Math.hypot(dx, dy) > 6) gesture.kind = 'pan';
   if (gesture.kind === 'pan') {
     view.cx = gesture.cx - dx / view.scale;
@@ -612,7 +623,7 @@ canvas.addEventListener('pointermove', (e) => {
 const endPointer = (e) => {
   if (!pointers.has(e.pointerId)) return;
   pointers.delete(e.pointerId);
-  if (gesture && gesture.kind === 'maybe-tap' && e.type === 'pointerup') onTap(e.offsetX, e.offsetY);
+  if (gesture && gesture.kind === 'maybe-tap' && e.type === 'pointerup') { const pt = localXY(e); onTap(pt.x, pt.y); }
   if (pointers.size === 0) gesture = null;
   else if (pointers.size === 1) {
     const [p] = [...pointers.values()];
@@ -623,7 +634,8 @@ canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0015));
+  const pt = localXY(e);
+  zoomAt(pt.x, pt.y, Math.exp(-e.deltaY * 0.0015));
 }, { passive: false });
 $('#btn-zoom-in').onclick = () => zoomAt(W / 2, H / 2, 1.3);
 $('#btn-zoom-out').onclick = () => zoomAt(W / 2, H / 2, 1 / 1.3);
@@ -808,7 +820,9 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---------- 起動 ----------
-window.addEventListener('resize', () => { resize(); });
+// 下部パネルの高さ変化でもステージの大きさが変わるため、ウィンドウではなくステージ自体を監視する
+window.addEventListener('resize', resize);
+if (window.ResizeObserver) new ResizeObserver(resize).observe($('#stage'));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { dirty = true; });
 async function boot() {
   resize();
@@ -823,6 +837,7 @@ async function boot() {
   }
   if (!L && examples.not) L = Layout.fromJSON(examples.not.layout);
   setLayout(L || new Layout());
+  ready = true;
   requestAnimationFrame(frame);
 }
 boot();
