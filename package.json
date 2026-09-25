@@ -1,0 +1,10 @@
+{
+  "name": "plarail-computation-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tools/test.mjs",
+    "examples": "node tools/build-examples.mjs",
+    "serve": "python3 -m http.server 8000 --directory docs"
+  }
+}
