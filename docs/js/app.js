@@ -78,6 +78,9 @@ function resize() {
   const dpr = window.devicePixelRatio || 1;
   if (r.width === W && r.height === H && dpr === DPR) return;
   DPR = dpr;
+  // 描画はキャンバス中心基準なので、下部パネルの伸縮で高さが変わると線路が上下に動いてしまう。
+  // 上端のワールド座標が変わらないよう view.cy を補正して、レイアウトを画面上で静止させる
+  if (H > 0 && r.height > 0) view.cy += (H - r.height) / (2 * view.scale);
   W = r.width; H = r.height;
   canvas.width = Math.round(W * DPR);
   canvas.height = Math.round(H * DPR);
