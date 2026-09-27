@@ -137,14 +137,21 @@ function fromSwitchGraph(G) {
   const { L, sw, stubs } = fromSwitchGraph(G);
   for (const n of ['A', 'B', 'C']) sw[n].props.role = 'in';
   for (const n of ['S', 'Co']) sw[n].props.role = 'out';
-  // 列車: X の行き止まり線（1/2直線）から X へ向かう
-  const stub = stubs[G.deadends.findIndex(([n]) => n === 'X')];
-  L.train = { partId: stub.partId, pathIdx: 0, dir: stub.port === 0 ? 1 : -1 };
+  // 補助ポイントの初期状態: S=1、他は 0（Z,K,W,N,J は任意）
+  sw.S.props.state = sw.S.props.inv ? 0 : 1;
+  // 列車: A の分岐直前（A の幹側に隣接するレール上で A へ向かう）
+  const nb = L.neighbor(sw.A.id, 0);
+  L.train = { partId: nb.partId, pathIdx: 0, dir: nb.port === 1 ? 1 : -1 };
   const t = check('fulladder', L);
   if (t.open.length !== G.deadends.length) throw new Error('fulladder: unexpected open ends');
+  // 終了条件は「終端到達 または 周回軌道に入る」。周回中は S, Co が変化しないことも確認する
   const tt = truthTable(L);
+  for (const r of tt.rows) {
+    const sum = r.inBits.reduce((a, b) => a + b, 0);
+    if (r.outBits[0] !== (sum >> 1) || r.outBits[1] !== (sum & 1)) throw new Error(`fulladder: wrong output for ${r.inBits.join('')}`);
+  }
   console.log('full adder truth table', tt.rows.map((r) => `${r.inBits.join('')}->${r.outBits.join('')} ${r.result}`));
-  out.fulladder = { title: '全加算器（A,B,C → S,Co の厳密配置／論理は要検証）', layout: L.toJSON() };
+  out.fulladder = { title: '全加算器（A,B,C → Co,S／周回軌道に入った時点で計算終了）', layout: L.toJSON() };
 }
 
 writeFileSync(new URL('../docs/examples/examples.json', import.meta.url), JSON.stringify(out));
