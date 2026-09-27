@@ -1,6 +1,7 @@
 // 簡易テスト: node tools/test.mjs
 import assert from 'node:assert/strict';
-import { worldPorts, placements, V0, PARTS } from '../docs/js/core.js';
+import { readFileSync } from 'node:fs';
+import { worldPorts, placements, V0, PARTS, Layout } from '../docs/js/core.js';
 import { runDiscrete, truthTable, Sim } from '../docs/js/sim.js';
 import { findRoutes } from '../docs/js/route.js';
 import { builder, bend } from './lib.mjs';
@@ -71,6 +72,40 @@ test('経路探索でターンアウトのリバースループが厳密に閉�
   assert.equal(t.conflicts.length, 0);
   assert.equal(t.overlaps.length, 0);
   console.log('   loop pieces:', routes[0].map((c) => c.type).join(' '));
+});
+
+test('終了条件 cycle: ストップ無しオーバルは周回で計算終了、終端は終端到達', () => {
+  const b = builder();
+  const s = b.first('R-01');
+  b.chain(s, 1, [...Array(4).fill(['R-03', bend('L')]), 'R-01', ...Array(4).fill(['R-03', bend('L')])]);
+  b.L.train = { partId: s.id, pathIdx: 0, dir: 1 };
+  b.L.settings.halt = 'cycle';
+  assert.equal(runDiscrete(b.L).result, 'cycle');
+  const sim = new Sim(b.L);
+  sim.advance(1e5);
+  assert.equal(sim.status, 'stopped');
+  const b2 = builder();
+  const s2 = b2.first('R-01');
+  b2.L.train = { partId: s2.id, pathIdx: 0, dir: 1 };
+  b2.L.settings.halt = 'cycle';
+  assert.equal(runDiscrete(b2.L).result, 'end');
+});
+
+test('全加算器サンプル: 周回で計算終了し Co,S が正しい。周回中に変化するポイントを出力にすると失敗', () => {
+  const ex = JSON.parse(readFileSync(new URL('../docs/examples/examples.json', import.meta.url), 'utf8'));
+  const L = Layout.fromJSON(ex.fulladder.layout);
+  const tt = truthTable(L);
+  for (const r of tt.rows) {
+    const sum = r.inBits.reduce((a, c) => a + c, 0);
+    assert.equal(r.result, 'cycle');
+    assert.deepEqual(r.outBits, [sum >> 1, sum & 1]);
+  }
+  L.settings.halt = 'stop';
+  assert.ok(truthTable(L).rows.every((r) => r.result === 'loop'));
+  L.settings.halt = 'cycle';
+  L.parts.find((p) => p.props.label === 'Q0').props.role = 'out';
+  const row = truthTable(L).rows.find((r) => r.inBits.join('') === '011');
+  assert.equal(row.result, 'loop');
 });
 
 console.log(`${n} tests passed`);

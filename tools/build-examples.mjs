@@ -144,9 +144,11 @@ function fromSwitchGraph(G) {
   L.train = { partId: nb.partId, pathIdx: 0, dir: nb.port === 1 ? 1 : -1 };
   const t = check('fulladder', L);
   if (t.open.length !== G.deadends.length) throw new Error('fulladder: unexpected open ends');
-  // 終了条件は「終端到達 または 周回軌道に入る」。周回中は S, Co が変化しないことも確認する
+  // 終了条件は「終端到達 または 周回軌道に入る」（周回中に出力が変化しないことは runDiscrete が確認する）
+  L.settings.halt = 'cycle';
   const tt = truthTable(L);
   for (const r of tt.rows) {
+    if (r.result !== 'cycle' && r.result !== 'end') throw new Error(`fulladder: ${r.inBits.join('')} ${r.result}`);
     const sum = r.inBits.reduce((a, b) => a + b, 0);
     if (r.outBits[0] !== (sum >> 1) || r.outBits[1] !== (sum & 1)) throw new Error(`fulladder: wrong output for ${r.inBits.join('')}`);
   }
