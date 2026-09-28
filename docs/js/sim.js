@@ -46,6 +46,8 @@ export class Sim {
     const L = this.layout;
     this.states = initialStates(L, overrides);
     this.entries = 0;
+    this.visited = new Map();
+    this.outHist = [];
     this.trail = [];
     this.message = '';
     if (!L.train || !L.get(L.train.partId)) {
@@ -84,8 +86,13 @@ export class Sim {
       const exitPort = exitPortOf(part, this.pos.pathIdx, this.pos.dir);
       const nb = L.neighbor(part.id, exitPort);
       if (!nb) {
-        this.status = 'derailed';
-        this.message = '線路の端から脱線';
+        if (haltOnEnd(L)) {
+          this.status = 'stopped';
+          this.message = '終端に到達して計算終了';
+        } else {
+          this.status = 'derailed';
+          this.message = '線路の端から脱線';
+        }
         return;
       }
       const np = L.get(nb.partId);
@@ -100,24 +107,56 @@ export class Sim {
         this.message = r.derail;
         return;
       }
+      if (haltOnCycle(L)) {
+        const key = `${np.id}:${nb.port}:${Object.values(this.states).join('')}`;
+        const outKey = L.switches().filter((p) => p.props.role === 'out').map((p) => this.states[p.id]).join('');
+        if (this.visited.has(key)) {
+          if (this.outHist.slice(this.visited.get(key)).every((k) => k === outKey)) {
+            this.status = 'stopped';
+            this.message = '周回軌道に入ったので計算終了';
+          } else {
+            this.status = 'derailed';
+            this.message = '周回中に出力が変化する（計算失敗）';
+          }
+          return;
+        }
+        this.visited.set(key, this.outHist.length);
+        this.outHist.push(outKey);
+      }
       if (this.entries - startEntries >= maxEntries) return;
     }
   }
 }
 
+// 終了条件: settings.halt
+//   'stop'  … ストップレールでの停止のみ成功（終端=脱線、周回=停止しない は失敗）
+//   'end'   … ストップレールに加え、終端に到達した時点でも計算終了とする（周回は失敗）
+//   'cycle' … さらに周回軌道に入った時点でも計算終了とする
+export const haltOnEnd = (layout) => layout.settings.halt === 'end' || layout.settings.halt === 'cycle';
+export const haltOnCycle = (layout) => layout.settings.halt === 'cycle';
+// 結果が計算成功（出力を読んでよい）か
+export const isSuccess = (result) => result === 'stopped' || result === 'end' || result === 'cycle';
+
 // 離散シミュレーション: 停止/脱線/無限ループを判定する
+// halt='end'/'cycle' のとき終端到達は 'end'。halt='cycle' のとき周回軌道への突入は 'cycle'（周回中に出力が変化する場合は 'loop'）
 export function runDiscrete(layout, overrides = null, maxSteps = 200000) {
   const L = layout;
   const states = initialStates(L, overrides);
   if (!L.train || !L.get(L.train.partId)) return { result: 'notrain', states, steps: 0 };
+  const cyc = haltOnCycle(L);
   let part = L.get(L.train.partId);
   let pathIdx = L.train.pathIdx, dir = L.train.dir;
   const swIds = L.switches().filter((p) => !PARTS[p.type].fixed).map((p) => p.id);
-  const seen = new Set();
+  const outIds = L.switches().filter((p) => p.props.role === 'out').map((p) => p.id);
+  const seen = new Map();
+  const outHist = [];
   for (let steps = 0; steps < maxSteps; steps++) {
     const exitPort = exitPortOf(part, pathIdx, dir);
     const nb = L.neighbor(part.id, exitPort);
-    if (!nb) return { result: 'derailed', states, steps, message: '線路の端から脱線' };
+    if (!nb) {
+      if (haltOnEnd(L)) return { result: 'end', states, steps, message: '終端に到達' };
+      return { result: 'derailed', states, steps, message: '線路の端から脱線' };
+    }
     const np = L.get(nb.partId);
     const r = routeThrough(L, np, nb.port, states);
     if (r.set !== undefined) states[np.id] = r.set;
@@ -125,8 +164,15 @@ export function runDiscrete(layout, overrides = null, maxSteps = 200000) {
     part = np; pathIdx = r.pathIdx; dir = r.dir;
     if (PARTS[part.type].stop && part.props.stop) return { result: 'stopped', states, steps: steps + 1, stopAt: part.id };
     const key = `${part.id}:${nb.port}:${swIds.map((id) => states[id]).join('')}`;
-    if (seen.has(key)) return { result: 'loop', states, steps: steps + 1 };
-    seen.add(key);
+    const outKey = outIds.map((id) => states[id]).join('');
+    if (seen.has(key)) {
+      if (!cyc) return { result: 'loop', states, steps: steps + 1 };
+      const stable = outHist.slice(seen.get(key)).every((k) => k === outKey);
+      if (!stable) return { result: 'loop', states, steps: steps + 1, message: '周回中に出力が変化する' };
+      return { result: 'cycle', states, steps: steps + 1, cycleLength: steps - seen.get(key), message: '周回軌道に入った' };
+    }
+    seen.set(key, steps);
+    outHist.push(outKey);
   }
   return { result: 'limit', states, steps: maxSteps };
 }

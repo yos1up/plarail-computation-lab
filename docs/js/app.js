@@ -2,7 +2,7 @@
 import {
   Layout, PARTS, PART_ORDER, GENDER_JA, placements, worldPorts, worldPaths as worldPathsOf, pointAt, vfloat, vrot, hmod, L_MM,
 } from './core.js';
-import { Sim, truthTable, ioSwitches, bitOf, initialStates } from './sim.js';
+import { Sim, truthTable, ioSwitches, bitOf, initialStates, isSuccess } from './sim.js';
 import { findRoutes } from './route.js';
 
 const $ = (s) => document.querySelector(s);
@@ -713,9 +713,17 @@ function openMenu() {
         <option value="derail" ${layout.settings.fixedTrail === 'derail' ? 'selected' : ''}>脱線（停止）</option>
       </select>
     </div>
+    <div class="row">計算終了の条件:
+      <select id="halt">
+        <option value="stop" ${!['end', 'cycle'].includes(layout.settings.halt) ? 'selected' : ''}>ストップレールで停止したときのみ</option>
+        <option value="end" ${layout.settings.halt === 'end' ? 'selected' : ''}>停止・終端到達のとき</option>
+        <option value="cycle" ${layout.settings.halt === 'cycle' ? 'selected' : ''}>停止・終端到達・周回軌道に入ったとき</option>
+      </select>
+    </div>
     <h4>サンプル</h4>
     <div class="menu">${ex || '<p class="hint">（読み込み失敗）</p>'}</div>`);
   $('#fixed-trail').onchange = (e) => { pushUndo(); layout.settings.fixedTrail = e.target.value; afterChange(); };
+  $('#halt').onchange = (e) => { pushUndo(); layout.settings.halt = e.target.value; afterChange(); };
 }
 $('#btn-menu').onclick = openMenu;
 $('#modal-body').addEventListener('click', async (e) => {
@@ -736,13 +744,13 @@ function showTruthTable() {
   let tt;
   try { tt = truthTable(layout); } catch (err) { return openModal('真理値表', `<p class="warn">${esc(err.message)}</p>`); }
   if (!layout.train) return openModal('真理値表', '<p class="warn">列車が配置されていません。</p>');
-  const RES = { stopped: '停止', derailed: '脱線', loop: '停止しない', limit: '上限到達' };
+  const RES = { stopped: '停止', end: '終端到達', cycle: '周回', derailed: '脱線', loop: '停止しない', limit: '上限到達' };
   const name = (p) => esc(p.props.label || '#' + p.id);
   const head = `<tr>${tt.inputs.map((p) => `<th class="in">${name(p)}</th>`).join('')}${tt.outputs.map((p) => `<th class="out">${name(p)}</th>`).join('')}<th>結果</th><th>通過数</th></tr>`;
-  const rows = tt.rows.map((r) => `<tr>${r.inBits.map((b) => `<td>${b}</td>`).join('')}${r.outBits.map((b) => `<td class="${r.result === 'stopped' ? '' : 'bad'}">${r.result === 'stopped' ? b : '—'}</td>`).join('')}<td class="${r.result === 'stopped' ? '' : 'bad'}">${RES[r.result] || r.result}</td><td>${r.steps}</td></tr>`).join('');
+  const rows = tt.rows.map((r) => `<tr>${r.inBits.map((b) => `<td>${b}</td>`).join('')}${r.outBits.map((b) => `<td class="${isSuccess(r.result) ? '' : 'bad'}">${isSuccess(r.result) ? b : '—'}</td>`).join('')}<td class="${isSuccess(r.result) ? '' : 'bad'}" title="${esc(r.message || '')}">${RES[r.result] || r.result}</td><td>${r.steps}</td></tr>`).join('');
   const note = !tt.inputs.length ? '<p class="hint">入力ポイントがありません（ポイントを選んで役割を「入力」に）。</p>' : '';
   const note2 = !tt.outputs.length ? '<p class="hint">出力ポイントがありません（ポイントを選んで役割を「出力」に）。</p>' : '';
-  openModal('真理値表', `${note}${note2}<p class="hint">各入力について、補助ポイントを初期状態に戻して列車を走らせ、停止時点の出力ポイントを読みます。</p><table class="tt">${head}${rows}</table>`);
+  openModal('真理値表', `${note}${note2}<p class="hint">各入力について、補助ポイントを初期状態に戻して列車を走らせ、${{ cycle: '停止・終端到達・周回軌道に入った時点（周回中に出力が変化しないこと）', end: '停止・終端到達の時点' }[layout.settings.halt] || '停止時点'}の出力ポイントを読みます。</p><table class="tt">${head}${rows}</table>`);
 }
 function showHelp() {
   openModal('使い方・ルール', `
@@ -751,6 +759,8 @@ function showHelp() {
       <li>分岐レールを A → B<sub>0</sub>, B<sub>1</sub> とし、状態 i のとき A 側から進入した列車は B<sub>i</sub> へ出る（状態は不変）。</li>
       <li>B<sub>j</sub> 側から進入した列車は A へ出て、状態が j に更新される。</li>
       <li>列車は1編成。ストップレール（レバー「停止させる」）に到達した時点で停止し、出力ポイントを読む。線路の端に達すると脱線。</li>
+      <li>設定「計算終了の条件」を「停止・終端到達のとき」にすると、線路の終端に到達した時点でも計算終了とし、その時点の出力を読む（周回は失敗）。</li>
+      <li>「停止・終端到達・周回軌道に入ったとき」にすると、終端到達や周回軌道への突入（同じ位置・同じポイント状態の再訪）でも計算終了とし、その時点の出力を読む。ただし周回中に出力が変化する場合は失敗。</li>
       <li>R-11 は 直進=0 / 分岐=1、R-12 は 左=0 / 右=1（A から見て）。「ビット反転」で読み替え可能。</li>
     </ul>
     <h4>幾何</h4>

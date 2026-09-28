@@ -211,7 +211,7 @@ export class Layout {
     this.parts = [];
     this.nextId = 1;
     this.train = null; // {partId, pathIdx, dir}
-    this.settings = { fixedTrail: 'pass' };
+    this.settings = { fixedTrail: 'pass', halt: 'stop' };
     this._topo = null;
   }
   touch() { this._topo = null; }
