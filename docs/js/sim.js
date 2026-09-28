@@ -86,7 +86,7 @@ export class Sim {
       const exitPort = exitPortOf(part, this.pos.pathIdx, this.pos.dir);
       const nb = L.neighbor(part.id, exitPort);
       if (!nb) {
-        if (haltOnCycle(L)) {
+        if (haltOnEnd(L)) {
           this.status = 'stopped';
           this.message = '終端に到達して計算終了';
         } else {
@@ -130,13 +130,15 @@ export class Sim {
 
 // 終了条件: settings.halt
 //   'stop'  … ストップレールでの停止のみ成功（終端=脱線、周回=停止しない は失敗）
-//   'cycle' … ストップレールに加え、終端に到達するか周回軌道に入った時点でも計算終了とする
+//   'end'   … ストップレールに加え、終端に到達した時点でも計算終了とする（周回は失敗）
+//   'cycle' … さらに周回軌道に入った時点でも計算終了とする
+export const haltOnEnd = (layout) => layout.settings.halt === 'end' || layout.settings.halt === 'cycle';
 export const haltOnCycle = (layout) => layout.settings.halt === 'cycle';
 // 結果が計算成功（出力を読んでよい）か
 export const isSuccess = (result) => result === 'stopped' || result === 'end' || result === 'cycle';
 
 // 離散シミュレーション: 停止/脱線/無限ループを判定する
-// halt='cycle' のとき、終端到達は 'end'、周回軌道への突入は 'cycle'（周回中に出力が変化する場合は 'loop'）
+// halt='end'/'cycle' のとき終端到達は 'end'。halt='cycle' のとき周回軌道への突入は 'cycle'（周回中に出力が変化する場合は 'loop'）
 export function runDiscrete(layout, overrides = null, maxSteps = 200000) {
   const L = layout;
   const states = initialStates(L, overrides);
@@ -152,7 +154,7 @@ export function runDiscrete(layout, overrides = null, maxSteps = 200000) {
     const exitPort = exitPortOf(part, pathIdx, dir);
     const nb = L.neighbor(part.id, exitPort);
     if (!nb) {
-      if (cyc) return { result: 'end', states, steps, message: '終端に到達' };
+      if (haltOnEnd(L)) return { result: 'end', states, steps, message: '終端に到達' };
       return { result: 'derailed', states, steps, message: '線路の端から脱線' };
     }
     const np = L.get(nb.partId);

@@ -108,4 +108,17 @@ test('全加算器サンプル: 周回で計算終了し Co,S が正しい。周
   assert.equal(row.result, 'loop');
 });
 
+test('全加算器（終端版）: 終端到達で計算終了し Co,S が正しい。周回や脱線にはならない', () => {
+  const ex = JSON.parse(readFileSync(new URL('../docs/examples/examples.json', import.meta.url), 'utf8'));
+  const L = Layout.fromJSON(ex.fulladder_stop.layout);
+  assert.equal(L.parts.filter((p) => p.type === 'R-11F').length, 4);
+  for (const r of truthTable(L).rows) {
+    const sum = r.inBits.reduce((a, c) => a + c, 0);
+    assert.equal(r.result, 'end');
+    assert.deepEqual(r.outBits, [sum >> 1, sum & 1]);
+  }
+  L.settings.halt = 'stop';
+  assert.ok(truthTable(L).rows.every((r) => r.result === 'derailed'));
+});
+
 console.log(`${n} tests passed`);
